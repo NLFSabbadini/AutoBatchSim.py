@@ -3,7 +3,6 @@ import json
 import sys
 import os
 import subprocess
-from .parse import *
 import sys
 from os import path
 import argparse
@@ -18,10 +17,10 @@ def parse(command, defaults, deltas):
     args = parser.parse_args(command)
     if not path.exists(args.testdir):
         raise Exception(f'Test directory {args.testdir:!r} not found')
-    sys.path.append(p.testdir)
-    if path.exists(f'{args.testdir}/{defaults}'):
+    sys.path.append(args.testdir)
+    if path.exists(f'{args.testdir}/defaults.py'):
         from defaults import defaults
-    if path.exists(f'{args.testdir}/{deltas}'):
+    if path.exists(f'{args.testdir}/deltas.py'):
         from deltas import deltas
 
     gamma = {key:val for key, val in args.d}
@@ -34,24 +33,24 @@ def parse(command, defaults, deltas):
             delta[key] = type(defaults[key])(val)
 
     argsl = [{**defaults, **delta} for delta in deltas]
-    subdirl = [f'{testdir}/{hash(f'{args}{time.time_ns()}')}' for args in argsl]
-    return testdir, subdir, argsl
+    subdirl = [f'{args.testdir}/{testname}' for testname in map(lambda args: hash(f'{args}{time.time_ns()}'), argsl)]
+    return args.testdir, subdirl, argsl
 
 
-def run(command=sys.argv, defaults={}, deltas=[{}], deploy='sh', preamble='', python=sys.executable):
+def run(command=sys.argv[1:], defaults={}, deltas=[{}], deploy='sh', preamble='', python=sys.executable):
     testdir, subdirl, argsl = parse(command, defaults, deltas)
     for subdir, args in zip(subdirl, argsl):
-        request = f'''
-        {deploy} << SH
-        {preamble}
-        {python} << PY
-        import sys
-        sys.path.append({testdir:!r})
-        from job import job
-        job({subdir:!r}, {args})
-        PY
-        SH'''
-
+        request = "\n".join((
+            f'{deploy} << SH',
+            f'{preamble}',
+            f'{python} << PY',
+            'import sys',
+            f'sys.path.append({testdir!r})',
+            'from job import job',
+            f'job({subdir!r}, {args})',
+            'PY',
+            'SH'
+        ))
         os.makedirs(subdir, exist_ok=True)
         with open(path.join(subdir,'args.json'),'w') as file:
             json.dump(args, file, indent=4)
